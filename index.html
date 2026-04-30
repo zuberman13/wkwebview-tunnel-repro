@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WKWebView Tunnel Repro</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; padding: 20px; max-width: 900px; margin: auto; }
+    #log { font-family: monospace; white-space: pre-wrap; border: 1px solid #ccc;
+           padding: 8px; max-height: 400px; overflow: auto; background: #f7f7f7; }
+    #status { font-size: 18px; font-weight: bold; }
+    button { padding: 8px 14px; font-size: 16px; margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <h1>WKWebView Tunnel Reproducer</h1>
+  <p id="status">Initializing…</p>
+  <p>
+    <button onclick="runReproFlow()">Run repro flow</button>
+    <button onclick="startProbe()">Start 30s probe</button>
+    <button onclick="document.getElementById('log').textContent=''">Clear log</button>
+  </p>
+  <pre id="log"></pre>
+
+  <!-- Heavy assets to populate the HTTP/2 connection pool, mimicking customer SPA -->
+  <script src="vendor.js" defer></script>
+  <script src="app.js" defer></script>
+  <link rel="stylesheet" href="vendor.css">
+  <link rel="stylesheet" href="app.css">
+
+  <script>
+    const logEl = document.getElementById('log');
+    const statusEl = document.getElementById('status');
+    function log(msg) {
+      const ts = new Date().toISOString();
+      logEl.textContent += `[${ts}] ${msg}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(`[${ts}] ${msg}`);
+    }
+    function setStatus(s) { statusEl.textContent = s; log('STATUS: ' + s); }
+
+    // ---- Repro flow ----
+    // Mimics the customer's failing pattern:
+    //   1. XHR to a "discovery" JSON file (analog of /.well-known/openid-configuration)
+    //   2. JS-driven window.location to authorize.html (analog of the OIDC redirect)
+    //
+    // The bug on iOS 26.4+ via tunnel: the navigation in step 2 hangs.
+    async function runReproFlow() {
+      setStatus('Step 1: Fetching discovery JSON via XHR…');
+      try {
+        const resp = await fetch('openid-configuration.json?t=' + Date.now(), {
+          headers: { 'Accept': 'application/json' },
+          credentials: 'same-origin'
+        });
+        log('Discovery XHR status: ' + resp.status);
+        const json = await resp.json();
+        log('Discovery payload keys: ' + Object.keys(json).join(', '));
+
+        // Step 2: JS-driven full-page navigation — this is where iOS 26.4+ hangs
+        const authorizeUrl = 'authorize.html'
+          + '?client_id=reprotest'
+          + '&response_type=id_token%20token'
+          + '&scope=openid'
+          + '&state=' + Math.random().toString(36).slice(2)
+          + '&nonce=' + Math.random().toString(36).slice(2);
+
+        setStatus('Step 2: Navigating via window.location.href to ' + authorizeUrl);
+        log('>>> Triggering window.location.href = "' + authorizeUrl + '"');
+        log('>>> If page hangs here on iOS 26.4+ via tunnel, BUG REPRODUCED.');
+        log('>>> Expected: page reaches authorize.html and shows ✅ SUCCESS.');
+
+        setTimeout(() => { window.location.href = authorizeUrl; }, 700);
+      } catch (e) {
+        setStatus('Discovery XHR FAILED: ' + e.message);
+        log('FAIL ' + e.message);
+      }
+    }
+
+    // ---- Diagnostic probe: 1 fetch/sec for 30 seconds ----
+    function startProbe() {
+      let count = 0;
+      log('Probe started (30s, 1 fetch/sec)…');
+      const id = setInterval(() => {
+        count++;
+        const url = 'openid-configuration.json?probe=' + count;
+        const t0 = performance.now();
+        fetch(url)
+          .then(r => log(`probe ${count}: OK ${r.status} (${Math.round(performance.now()-t0)}ms)`))
+          .catch(e => log(`probe ${count}: FAIL ${e.message}`));
+      }, 1000);
+      setTimeout(() => { clearInterval(id); log('Probe finished.'); }, 30000);
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      log('DOMContentLoaded');
+      setStatus('Ready. Click "Run repro flow" to begin.');
+    });
+  </script>
+</body>
+</html>

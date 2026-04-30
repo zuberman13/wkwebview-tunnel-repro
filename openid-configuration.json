@@ -1,0 +1,12 @@
+{
+  "issuer": "https://repro.local/identity",
+  "authorization_endpoint": "https://repro.local/authorize.html",
+  "token_endpoint": "https://repro.local/identity/connect/token",
+  "jwks_uri": "https://repro.local/identity/.well-known/jwks",
+  "response_types_supported": ["id_token", "id_token token", "code"],
+  "subject_types_supported": ["public"],
+  "id_token_signing_alg_values_supported": ["RS256"],
+  "scopes_supported": ["openid", "profile", "email"],
+  "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+  "claims_supported": ["sub", "name", "email", "preferred_username"]
+}
